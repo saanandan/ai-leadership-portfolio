@@ -398,6 +398,26 @@ def seed_default_metrics():
         print(f"❌ Failed to seed default metrics: {e}")
         return False
 
+def delete_signal(signal_id):
+    """Delete a signal record by id"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            DELETE FROM signals WHERE id = ?
+        """, (signal_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"✅ Signal {signal_id} deleted successfully!")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Failed to delete signal: {e}")
+        return False
+
 def initialize_database():
     """Initialize all database tables (will be expanded in future tasks)"""
     try:
