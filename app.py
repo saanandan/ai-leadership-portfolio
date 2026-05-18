@@ -47,7 +47,8 @@ def show_onboarding():
     st.set_page_config(
         page_title="Engineering Leadership Signal Tool",
         page_icon="📊",
-        layout="wide"
+        layout="wide",
+        initial_sidebar_state="expanded"
     )
     
     # Header
@@ -160,7 +161,8 @@ def show_main_app():
     st.set_page_config(
         page_title="Engineering Leadership Signal Tool",
         page_icon="📊",
-        layout="wide"
+        layout="wide",
+        initial_sidebar_state="expanded"
     )
     
     # Sidebar navigation
@@ -169,6 +171,9 @@ def show_main_app():
         
         if st.button("🏠 Dashboard", use_container_width=True):
             st.rerun()
+        
+        if st.button("📝 Signal Logging", use_container_width=True):
+            st.switch_page("pages/signal_logging.py")
         
         if st.button("👥 Team Setup", use_container_width=True):
             st.switch_page("pages/team_setup.py")
