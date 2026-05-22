@@ -174,7 +174,10 @@ def show_main_app():
         
         if st.button("📝 Signal Logging", use_container_width=True):
             st.switch_page("pages/signal_logging.py")
-        
+
+        if st.button("📊 Metric Annotation", use_container_width=True):
+            st.switch_page("pages/metric_annotation.py")
+
         if st.button("👥 Team Setup", use_container_width=True):
             st.switch_page("pages/team_setup.py")
         

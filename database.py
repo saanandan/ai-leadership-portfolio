@@ -373,10 +373,10 @@ def seed_default_metrics():
         cursor = conn.cursor()
         
         default_metrics = [
-            ("Release Frequency", "How often the team releases software to production"),
-            ("Vuln Remediation", "Time to fix security vulnerabilities"),
-            ("CICD Health", "Overall health and reliability of CI/CD pipeline"),
-            ("Deployment Success Rate", "Percentage of successful deployments")
+            ("CICD Health", "Overall health and reliability of the CI/CD pipeline including release frequency, build success rate, and pipeline reliability"),
+            ("Vuln Remediation", "Time to fix security vulnerabilities — tracks open vulns, remediation velocity, and SLA compliance"),
+            ("Deployment Success Rate", "Percentage of deployments that complete successfully without rollback or incident"),
+            ("Test Coverage", "Percentage of codebase covered by automated tests — unit, integration, and end-to-end"),
         ]
         
         for name, description in default_metrics:
@@ -397,6 +397,265 @@ def seed_default_metrics():
     except Exception as e:
         print(f"❌ Failed to seed default metrics: {e}")
         return False
+
+def save_annotation(metric_id, current_value, classification, explanation, remediation_owner_id=None, expected_resolution_date=None):
+    """Insert a new metric annotation and return its id, or None on failure."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT INTO metric_annotations
+                (metric_id, current_value, classification, explanation, remediation_owner_id, expected_resolution_date)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (metric_id, current_value, classification, explanation, remediation_owner_id, expected_resolution_date))
+
+        conn.commit()
+        new_id = cursor.lastrowid
+        conn.close()
+        return new_id
+
+    except Exception as e:
+        print(f"❌ Failed to save annotation: {e}")
+        return None
+
+
+def get_metric_annotations(metric_id):
+    """Return all annotations for a metric in reverse chronological order, joining engineer name."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT ma.*, e.name AS remediation_owner_name
+            FROM metric_annotations ma
+            LEFT JOIN engineers e ON ma.remediation_owner_id = e.id
+            WHERE ma.metric_id = ?
+            ORDER BY ma.annotated_at DESC
+        """, (metric_id,))
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [dict(r) for r in rows]
+
+    except Exception as e:
+        print(f"❌ Failed to get metric annotations: {e}")
+        return []
+
+
+def detect_metric_trends():
+    """Scan all active metrics and return trend flags based on annotation history.
+
+    Checks three patterns per metric:
+    - sustained_red:          classification == 'Red' for 2+ consecutive annotations
+    - improving_trend:        classification improves across 3+ consecutive annotations
+                              (Red → Orange/Amber, Orange → Amber)
+    - sustained_improvement:  a non-Red classification is maintained for 4+ consecutive annotations
+
+    Returns a list of dicts: metric_id, metric_name, flag_type, duration.
+    """
+    SEVERITY = {'Red': 3, 'Orange': 2, 'Amber': 1}
+
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT id, name FROM metrics WHERE is_active = 1")
+        metrics = [dict(r) for r in cursor.fetchall()]
+
+        flags = []
+
+        for metric in metrics:
+            mid = metric['id']
+            mname = metric['name']
+
+            cursor.execute("""
+                SELECT classification
+                FROM metric_annotations
+                WHERE metric_id = ?
+                ORDER BY annotated_at DESC
+            """, (mid,))
+            rows = [r['classification'] for r in cursor.fetchall()]
+
+            if not rows:
+                continue
+
+            # ── Sustained Red: 2+ consecutive Red ─────────────────────────
+            streak = 0
+            for c in rows:
+                if c == 'Red':
+                    streak += 1
+                else:
+                    break
+            if streak >= 2:
+                flags.append({'metric_id': mid, 'metric_name': mname,
+                               'flag_type': 'sustained_red', 'duration': streak})
+
+            # ── Improving trend: severity strictly decreasing across 3+ consecutive ──
+            if len(rows) >= 3:
+                improving_streak = 1
+                for i in range(1, len(rows)):
+                    prev_sev = SEVERITY.get(rows[i - 1], 0)
+                    curr_sev = SEVERITY.get(rows[i], 0)
+                    # rows are newest-first, so "improving" means newer < older severity
+                    if prev_sev < curr_sev:
+                        improving_streak += 1
+                    else:
+                        break
+                if improving_streak >= 3:
+                    flags.append({'metric_id': mid, 'metric_name': mname,
+                                  'flag_type': 'improving_trend', 'duration': improving_streak})
+
+            # ── Sustained improvement: non-Red for 4+ consecutive ─────────
+            streak = 0
+            for c in rows:
+                if c != 'Red':
+                    streak += 1
+                else:
+                    break
+            if streak >= 4:
+                flags.append({'metric_id': mid, 'metric_name': mname,
+                               'flag_type': 'sustained_improvement', 'duration': streak})
+
+        conn.close()
+        return flags
+
+    except Exception as e:
+        print(f"❌ Failed to detect metric trends: {e}")
+        return []
+
+
+def get_metric_trend_flags():
+    """Return all active metric trend flags by calling detect_metric_trends().
+
+    Each entry contains: metric_id, metric_name, flag_type, duration.
+    """
+    return detect_metric_trends()
+
+
+def update_strategic_context(metric_id, new_context):
+    """Update strategic_context on a metric and archive the previous value to history.
+
+    Returns True on success, False on failure.
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # Fetch current context before overwriting
+        cursor.execute("SELECT strategic_context FROM metrics WHERE id = ?", (metric_id,))
+        row = cursor.fetchone()
+        if row is None:
+            conn.close()
+            return False
+        previous_context = row['strategic_context']
+
+        # Save previous value to history (even if it was NULL)
+        cursor.execute("""
+            INSERT INTO strategic_context_history (metric_id, previous_context, new_context)
+            VALUES (?, ?, ?)
+        """, (metric_id, previous_context, new_context))
+
+        # Update the metric
+        cursor.execute("""
+            UPDATE metrics
+            SET strategic_context = ?, strategic_context_updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (new_context, metric_id))
+
+        conn.commit()
+        conn.close()
+        return True
+
+    except Exception as e:
+        print(f"❌ Failed to update strategic context: {e}")
+        return False
+
+
+def get_strategic_context_history(metric_id):
+    """Return all historical strategic contexts for a metric in reverse chronological order."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT previous_context, new_context, changed_at
+            FROM strategic_context_history
+            WHERE metric_id = ?
+            ORDER BY changed_at DESC
+        """, (metric_id,))
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [dict(r) for r in rows]
+
+    except Exception as e:
+        print(f"❌ Failed to get strategic context history: {e}")
+        return []
+
+
+def get_all_metrics():
+    """Returns all active metrics ordered by default metrics first, then custom ones alphabetically"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT * FROM metrics
+            WHERE is_active = 1
+            ORDER BY is_default DESC, name ASC
+        """)
+        metrics = cursor.fetchall()
+
+        conn.close()
+        return [dict(m) for m in metrics]
+
+    except Exception as e:
+        print(f"❌ Failed to get metrics: {e}")
+        return []
+
+
+def add_custom_metric(name, description=None):
+    """Inserts a new custom metric with is_default=0 and returns the new id, or None on failure"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT INTO metrics (name, description, is_default, is_active)
+            VALUES (?, ?, 0, 1)
+        """, (name, description))
+
+        conn.commit()
+        new_id = cursor.lastrowid
+        conn.close()
+
+        return new_id
+
+    except Exception as e:
+        print(f"❌ Failed to add custom metric: {e}")
+        return None
+
+
+def deactivate_metric(metric_id):
+    """Sets is_active to 0 for the given metric, preserving all historical annotation data"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            UPDATE metrics SET is_active = 0 WHERE id = ?
+        """, (metric_id,))
+
+        conn.commit()
+        conn.close()
+
+        return True
+
+    except Exception as e:
+        print(f"❌ Failed to deactivate metric: {e}")
+        return False
+
 
 def get_signals(engineer_id=None, start_date=None, end_date=None, delivery_signal=None, stress_level=None, uncertainty_level=None):
     """Return signals in reverse chronological order with optional filters.
