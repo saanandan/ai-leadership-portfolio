@@ -398,6 +398,78 @@ def seed_default_metrics():
         print(f"❌ Failed to seed default metrics: {e}")
         return False
 
+def get_signals(engineer_id=None, start_date=None, end_date=None, delivery_signal=None, stress_level=None, uncertainty_level=None):
+    """Return signals in reverse chronological order with optional filters.
+
+    Joins engineers so each row includes engineer_name. All filter params are optional.
+    start_date and end_date are inclusive and should be date or datetime objects (or ISO strings).
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        query = """
+            SELECT s.*, e.name AS engineer_name
+            FROM signals s
+            JOIN engineers e ON s.engineer_id = e.id
+            WHERE 1=1
+        """
+        params = []
+
+        if engineer_id is not None:
+            query += " AND s.engineer_id = ?"
+            params.append(engineer_id)
+        if start_date is not None:
+            query += " AND DATE(s.logged_at) >= DATE(?)"
+            params.append(str(start_date))
+        if end_date is not None:
+            query += " AND DATE(s.logged_at) <= DATE(?)"
+            params.append(str(end_date))
+        if delivery_signal is not None:
+            query += " AND s.delivery_signal = ?"
+            params.append(delivery_signal)
+        if stress_level is not None:
+            query += " AND s.stress_level = ?"
+            params.append(stress_level)
+        if uncertainty_level is not None:
+            query += " AND s.uncertainty_level = ?"
+            params.append(uncertainty_level)
+
+        query += " ORDER BY s.logged_at DESC"
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [dict(row) for row in rows]
+
+    except Exception as e:
+        print(f"❌ Failed to get signals: {e}")
+        return []
+
+
+def save_signal(engineer_id, energy_level, delivery_signal, growth_signal, stress_level, stress_source, uncertainty_level, uncertainty_source, observation):
+    """Insert a new signal record and return the id of the newly created record"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT INTO signals (engineer_id, energy_level, delivery_signal, growth_signal, stress_level, stress_source, uncertainty_level, uncertainty_source, observation)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (engineer_id, energy_level, delivery_signal, growth_signal, stress_level, stress_source, uncertainty_level, uncertainty_source, observation))
+
+        conn.commit()
+        new_id = cursor.lastrowid
+        conn.close()
+
+        return new_id
+
+    except Exception as e:
+        print(f"❌ Failed to save signal: {e}")
+        return None
+
+
 def delete_signal(signal_id):
     """Delete a signal record by id"""
     try:
@@ -417,6 +489,123 @@ def delete_signal(signal_id):
     except Exception as e:
         print(f"❌ Failed to delete signal: {e}")
         return False
+
+def detect_trends():
+    """Scan all engineers' signals and return a list of active trend flags.
+
+    Checks four patterns per engineer:
+    - stress_trend:      stress_level == 'High' for 3+ consecutive check-ins
+    - uncertainty_trend: uncertainty_level == 'High' for 2+ consecutive check-ins
+    - delivery_trend:    delivery_signal in ('Blocked', 'At Risk') for 2+ consecutive check-ins
+    - energy_trend:      average energy_level < 3 across 3+ check-ins in the last 30 days
+
+    Returns a list of dicts: engineer_id, engineer_name, flag_type, duration.
+    duration = consecutive check-in count (or check-in count for energy).
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT id, name FROM engineers WHERE active = 1")
+        engineers = [dict(row) for row in cursor.fetchall()]
+
+        flags = []
+
+        for engineer in engineers:
+            eid = engineer['id']
+            ename = engineer['name']
+
+            # Fetch all signals newest-first for consecutive streak checks
+            cursor.execute("""
+                SELECT stress_level, uncertainty_level, delivery_signal, energy_level, logged_at
+                FROM signals
+                WHERE engineer_id = ?
+                ORDER BY logged_at DESC
+            """, (eid,))
+            rows = [dict(r) for r in cursor.fetchall()]
+
+            if not rows:
+                continue
+
+            # ── Stress: 3+ consecutive 'High' ─────────────────────────────
+            streak = 0
+            for row in rows:
+                if row['stress_level'] == 'High':
+                    streak += 1
+                else:
+                    break
+            if streak >= 3:
+                flags.append({
+                    'engineer_id': eid,
+                    'engineer_name': ename,
+                    'flag_type': 'stress_trend',
+                    'duration': streak,
+                })
+
+            # ── Uncertainty: 2+ consecutive 'High' ────────────────────────
+            streak = 0
+            for row in rows:
+                if row['uncertainty_level'] == 'High':
+                    streak += 1
+                else:
+                    break
+            if streak >= 2:
+                flags.append({
+                    'engineer_id': eid,
+                    'engineer_name': ename,
+                    'flag_type': 'uncertainty_trend',
+                    'duration': streak,
+                })
+
+            # ── Delivery: 2+ consecutive 'Blocked' or 'At Risk' ───────────
+            streak = 0
+            for row in rows:
+                if row['delivery_signal'] in ('Blocked', 'At Risk'):
+                    streak += 1
+                else:
+                    break
+            if streak >= 2:
+                flags.append({
+                    'engineer_id': eid,
+                    'engineer_name': ename,
+                    'flag_type': 'delivery_trend',
+                    'duration': streak,
+                })
+
+            # ── Energy: avg < 3 across 3+ check-ins in the last 30 days ──
+            cursor.execute("""
+                SELECT energy_level
+                FROM signals
+                WHERE engineer_id = ?
+                  AND logged_at >= datetime('now', '-30 days')
+                ORDER BY logged_at DESC
+            """, (eid,))
+            energy_rows = cursor.fetchall()
+            if len(energy_rows) >= 3:
+                avg_energy = sum(r['energy_level'] for r in energy_rows) / len(energy_rows)
+                if avg_energy < 3:
+                    flags.append({
+                        'engineer_id': eid,
+                        'engineer_name': ename,
+                        'flag_type': 'energy_trend',
+                        'duration': len(energy_rows),
+                    })
+
+        conn.close()
+        return flags
+
+    except Exception as e:
+        print(f"❌ Failed to detect trends: {e}")
+        return []
+
+
+def get_active_trend_flags():
+    """Return all active trend flags across all engineers by calling detect_trends().
+
+    Each entry contains: engineer_id, engineer_name, flag_type, duration.
+    """
+    return detect_trends()
+
 
 def initialize_database():
     """Initialize all database tables (will be expanded in future tasks)"""

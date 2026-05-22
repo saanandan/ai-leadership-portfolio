@@ -1,6 +1,6 @@
 import streamlit as st
-from database import get_all_engineers, delete_signal
-from datetime import datetime, timedelta
+from database import get_all_engineers, save_signal, delete_signal, get_signals
+from datetime import datetime, timedelta, date
 
 def show_signal_logging():
     """Display signal logging screen"""
@@ -17,6 +17,8 @@ def show_signal_logging():
         st.session_state.saved_signal_id = None
     if 'saved_signal_time' not in st.session_state:
         st.session_state.saved_signal_time = None
+    if 'saved_engineer_name' not in st.session_state:
+        st.session_state.saved_engineer_name = None
     
     st.markdown("# 📝 Signal Logging")
     st.markdown("Log human signals captured during 1:1 meetings with individual engineers.")
@@ -185,7 +187,8 @@ def show_signal_logging():
     
     # Show post-save buttons if a signal was just saved
     if st.session_state.signal_saved:
-        st.success("✅ Signal logged successfully!")
+        logged_at = st.session_state.saved_signal_time.strftime("%B %d, %Y at %I:%M %p")
+        st.success(f"✅ Signal logged for **{st.session_state.saved_engineer_name}** on {logged_at}")
         
         # Check if within 10-minute window for undo
         time_since_save = datetime.now() - st.session_state.saved_signal_time
@@ -202,6 +205,7 @@ def show_signal_logging():
                     st.session_state.signal_saved = False
                     st.session_state.saved_signal_id = None
                     st.session_state.saved_signal_time = None
+                    st.session_state.saved_engineer_name = None
                     # Clear all form keys
                     for key in st.session_state.keys():
                         if key in ['engineer_select', 'energy_level', 'delivery_signal', 'growth_signal', 
@@ -218,6 +222,7 @@ def show_signal_logging():
                                 st.session_state.signal_saved = False
                                 st.session_state.saved_signal_id = None
                                 st.session_state.saved_signal_time = None
+                                st.session_state.saved_engineer_name = None
                                 st.rerun()
                             else:
                                 st.error("❌ Failed to delete signal.")
@@ -265,15 +270,26 @@ def show_signal_logging():
                         'observation': observation.strip() if observation.strip() else None
                     }
                     
-                    # TODO: Save to database - for now just simulate
-                    # In real implementation, this would call a save_signal function
-                    # For now, we'll simulate saving with a fake ID
-                    st.session_state.saved_signal_id = 1  # This would be the actual ID from database
+                    new_id = save_signal(
+                        engineer_id=signal_data['engineer_id'],
+                        energy_level=signal_data['energy_level'],
+                        delivery_signal=signal_data['delivery_signal'],
+                        growth_signal=signal_data['growth_signal'],
+                        stress_level=signal_data['stress_level'],
+                        stress_source=signal_data['stress_source'],
+                        uncertainty_level=signal_data['uncertainty_level'],
+                        uncertainty_source=signal_data['uncertainty_source'],
+                        observation=signal_data['observation']
+                    )
+
+                    if new_id is None:
+                        st.error("❌ Failed to save signal. Please try again.")
+                        st.stop()
+
+                    st.session_state.saved_signal_id = new_id
                     st.session_state.saved_signal_time = datetime.now()
+                    st.session_state.saved_engineer_name = selected_engineer[1]
                     st.session_state.signal_saved = True
-                    
-                    st.success("✅ Signal logged successfully!")
-                    st.json(signal_data)
                     st.rerun()
         
         with col1:
@@ -281,6 +297,88 @@ def show_signal_logging():
         
         with col3:
             st.markdown("&nbsp;")
+
+    # ── Signal History ────────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("## Signal History")
+
+    # Filters
+    with st.expander("Filters", expanded=True):
+        f_col1, f_col2 = st.columns(2)
+
+        with f_col1:
+            engineer_options = [("", "All Engineers")] + [(e['id'], e['name']) for e in engineers]
+            filter_engineer = st.selectbox(
+                "Engineer",
+                options=engineer_options,
+                format_func=lambda x: x[1],
+                key="history_engineer"
+            )
+
+            filter_delivery = st.selectbox(
+                "Delivery Signal",
+                options=["All", "On Track", "At Risk", "Blocked"],
+                key="history_delivery"
+            )
+
+        with f_col2:
+            today = date.today()
+            filter_start = st.date_input(
+                "From date",
+                value=today.replace(day=1),
+                key="history_start"
+            )
+            filter_end = st.date_input(
+                "To date",
+                value=today,
+                key="history_end"
+            )
+
+            filter_stress = st.selectbox(
+                "Stress Level",
+                options=["All", "Low", "Moderate", "High"],
+                key="history_stress"
+            )
+
+        filter_uncertainty = st.selectbox(
+            "Uncertainty Level",
+            options=["All", "Low", "Moderate", "High"],
+            key="history_uncertainty"
+        )
+
+    signals = get_signals(
+        engineer_id=filter_engineer[0] if filter_engineer[0] != "" else None,
+        start_date=filter_start,
+        end_date=filter_end,
+        delivery_signal=filter_delivery if filter_delivery != "All" else None,
+        stress_level=filter_stress if filter_stress != "All" else None,
+        uncertainty_level=filter_uncertainty if filter_uncertainty != "All" else None,
+    )
+
+    if not signals:
+        st.info("No signals match the selected filters.")
+    else:
+        rows = []
+        for s in signals:
+            logged_dt = s['logged_at']
+            if isinstance(logged_dt, str):
+                try:
+                    logged_dt = datetime.fromisoformat(logged_dt).strftime("%Y-%m-%d %H:%M")
+                except ValueError:
+                    pass
+            rows.append({
+                "Date": logged_dt,
+                "Engineer": s['engineer_name'],
+                "Energy": s['energy_level'],
+                "Delivery": s['delivery_signal'],
+                "Growth": s['growth_signal'],
+                "Stress": s['stress_level'],
+                "Uncertainty": s['uncertainty_level'],
+                "Observation": s['observation'] or "",
+            })
+
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+
 
 if __name__ == "__main__":
     show_signal_logging()
