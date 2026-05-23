@@ -178,6 +178,9 @@ def show_main_app():
         if st.button("📊 Metric Annotation", use_container_width=True):
             st.switch_page("pages/metric_annotation.py")
 
+        if st.button("🚧 Manager Blockers", use_container_width=True):
+            st.switch_page("pages/manager_blockers.py")
+
         if st.button("👥 Team Setup", use_container_width=True):
             st.switch_page("pages/team_setup.py")
         

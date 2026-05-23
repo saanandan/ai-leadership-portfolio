@@ -420,6 +420,112 @@ def save_annotation(metric_id, current_value, classification, explanation, remed
         return None
 
 
+def save_blocker(description, open_since, what_tried, options_remaining, escalation_type, specific_ask):
+    """Insert a new manager blocker and return its id, or None on failure."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT INTO manager_blockers
+                (description, open_since, what_tried, options_remaining, escalation_type, specific_ask)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (description, str(open_since), what_tried, options_remaining, escalation_type, specific_ask))
+
+        conn.commit()
+        new_id = cursor.lastrowid
+        conn.close()
+        return new_id
+
+    except Exception as e:
+        print(f"❌ Failed to save blocker: {e}")
+        return None
+
+
+def get_active_blockers():
+    """Return all unresolved blockers in reverse chronological order."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT * FROM manager_blockers
+            WHERE resolved = 0
+            ORDER BY created_at DESC
+        """)
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    except Exception as e:
+        print(f"❌ Failed to get active blockers: {e}")
+        return []
+
+
+def get_resolved_blockers():
+    """Return all resolved blockers in reverse chronological order of resolution."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT * FROM manager_blockers
+            WHERE resolved = 1
+            ORDER BY resolved_at DESC
+        """)
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    except Exception as e:
+        print(f"❌ Failed to get resolved blockers: {e}")
+        return []
+
+
+def detect_aging_blockers():
+    """Return all unresolved blockers that have been open for 14 or more days."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT * FROM manager_blockers
+            WHERE resolved = 0
+              AND julianday('now') - julianday(open_since) >= 14
+            ORDER BY open_since ASC
+        """)
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    except Exception as e:
+        print(f"❌ Failed to detect aging blockers: {e}")
+        return []
+
+
+def resolve_blocker(blocker_id, resolved_at, resolution_description):
+    """Set resolved=1, resolved_at, and resolution_description on a blocker. Returns True on success."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            UPDATE manager_blockers
+            SET resolved = 1,
+                resolved_at = ?,
+                resolution_description = ?
+            WHERE id = ?
+        """, (str(resolved_at), resolution_description, blocker_id))
+
+        conn.commit()
+        conn.close()
+        return True
+
+    except Exception as e:
+        print(f"❌ Failed to resolve blocker: {e}")
+        return False
+
+
 def get_metric_annotations(metric_id):
     """Return all annotations for a metric in reverse chronological order, joining engineer name."""
     try:
