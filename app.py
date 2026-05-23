@@ -184,6 +184,9 @@ def show_main_app():
         if st.button("📋 Generate Brief", use_container_width=True):
             st.switch_page("pages/generate_brief.py")
 
+        if st.button("📈 History", use_container_width=True):
+            st.switch_page("pages/history.py")
+
         if st.button("👥 Team Setup", use_container_width=True):
             st.switch_page("pages/team_setup.py")
         

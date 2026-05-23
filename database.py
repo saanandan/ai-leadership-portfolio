@@ -1012,6 +1012,78 @@ def update_brief_edited_content(brief_id, edited_content):
         return False
 
 
+def get_annotations_in_range(start_date, end_date):
+    """Return all metric annotations in the date range in chronological order.
+
+    Each row includes: all metric_annotations columns, plus metric_name and
+    remediation_owner_name (from joined tables).
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT ma.*, m.name AS metric_name, e.name AS remediation_owner_name
+            FROM metric_annotations ma
+            JOIN metrics m ON ma.metric_id = m.id
+            LEFT JOIN engineers e ON ma.remediation_owner_id = e.id
+            WHERE DATE(ma.annotated_at) >= DATE(?)
+              AND DATE(ma.annotated_at) <= DATE(?)
+            ORDER BY ma.annotated_at ASC
+        """, (str(start_date), str(end_date)))
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    except Exception as e:
+        print(f"❌ Failed to get annotations in range: {e}")
+        return []
+
+
+def get_blockers_in_range(start_date, end_date):
+    """Return all blockers (active and resolved) whose open_since date falls in the range,
+    in chronological order.
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT * FROM manager_blockers
+            WHERE DATE(open_since) >= DATE(?)
+              AND DATE(open_since) <= DATE(?)
+            ORDER BY open_since ASC
+        """, (str(start_date), str(end_date)))
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    except Exception as e:
+        print(f"❌ Failed to get blockers in range: {e}")
+        return []
+
+
+def save_retrospective(period_start, period_end, content):
+    """Insert a new retrospective record and return its id, or None on failure."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT INTO retrospectives (period_start, period_end, content)
+            VALUES (?, ?, ?)
+        """, (str(period_start), str(period_end), content))
+
+        conn.commit()
+        new_id = cursor.lastrowid
+        conn.close()
+        return new_id
+
+    except Exception as e:
+        print(f"❌ Failed to save retrospective: {e}")
+        return None
+
+
 def get_all_briefs():
     """Return all briefs in reverse chronological order.
 
@@ -1039,75 +1111,133 @@ def get_all_briefs():
 
 
 def detect_team_wide_patterns():
-    """Detect patterns where 50%+ of the team shows the same signal over an extended period.
+    """Detect team-wide patterns where 50%+ of active engineers show sustained signals.
+
+    An engineer is "affected" for a given dimension if, starting from their most recent
+    logged week and going backward, every consecutive ISO week in which they logged at
+    least one signal shows only Moderate or High values for that dimension.  Weeks with
+    no signals are skipped without breaking the streak.
 
     Checks:
-    - stress_pattern:      50%+ of engineers with signals have High stress in every signal
-                           within the last 42 days (6 weeks)
-    - uncertainty_pattern: 50%+ of engineers with signals have High uncertainty in every signal
-                           within the last 21 days (3 weeks)
+    - stress_pattern:      50%+ of engineers have a consecutive-week streak of >= 6
+                           with all stress signals at Moderate or High.
+    - uncertainty_pattern: 50%+ of engineers have a consecutive-week streak of >= 3
+                           with all uncertainty signals at Moderate or High.
 
-    Returns a list of dicts: pattern_type, affected_count, team_size, percentage, duration_weeks.
+    Returns a list of dicts: pattern_type, affected_count, total_engineers,
+    duration_weeks, most_common_source.
     """
+    STRESS_VALID = {'Moderate', 'High'}
+    UNCERTAINTY_VALID = {'Moderate', 'High'}
+    STRESS_THRESHOLD = 6
+    UNCERTAINTY_THRESHOLD = 3
+
+    def _iso_week(iso_str):
+        try:
+            cal = datetime.fromisoformat(iso_str).isocalendar()
+            return (cal[0], cal[1])
+        except Exception:
+            return None
+
+    def _consecutive_weeks(signals, level_field, valid_values):
+        """Count consecutive logged ISO weeks (newest-first) where ALL signals match."""
+        week_buckets = {}
+        for s in signals:
+            wk = _iso_week(s['logged_at'])
+            if wk is None:
+                continue
+            week_buckets.setdefault(wk, []).append(s[level_field])
+
+        if not week_buckets:
+            return 0
+
+        streak = 0
+        for wk in sorted(week_buckets, reverse=True):
+            if all(v in valid_values for v in week_buckets[wk]):
+                streak += 1
+            else:
+                break
+        return streak
+
+    def _most_common_source(affected_ids, by_engineer, level_field, source_field, valid_values):
+        sources = []
+        for eid in affected_ids:
+            for s in by_engineer.get(eid, []):
+                if s.get(source_field) and s[level_field] in valid_values:
+                    sources.append(s[source_field].strip())
+        sources = [src for src in sources if src]
+        return max(set(sources), key=sources.count) if sources else None
+
     try:
         conn = get_connection()
         cursor = conn.cursor()
 
-        cursor.execute("SELECT id, name FROM engineers WHERE active = 1")
+        cursor.execute("SELECT id FROM engineers WHERE active = 1")
         engineers = [dict(r) for r in cursor.fetchall()]
-        team_size = len(engineers)
+        total = len(engineers)
 
-        if team_size == 0:
+        if total == 0:
             conn.close()
             return []
 
+        cursor.execute("""
+            SELECT engineer_id, stress_level, stress_source,
+                   uncertainty_level, uncertainty_source, logged_at
+            FROM signals
+        """)
+        all_signals = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+
+        by_engineer = {}
+        for s in all_signals:
+            by_engineer.setdefault(s['engineer_id'], []).append(s)
+
         patterns = []
 
-        # ── Stress pattern: all signals in last 42 days are 'High' ────────────
-        stress_affected = 0
-        for eng in engineers:
-            cursor.execute("""
-                SELECT stress_level FROM signals
-                WHERE engineer_id = ?
-                  AND logged_at >= datetime('now', '-42 days')
-                ORDER BY logged_at DESC
-            """, (eng['id'],))
-            rows = [r['stress_level'] for r in cursor.fetchall()]
-            if rows and all(s == 'High' for s in rows):
-                stress_affected += 1
+        # ── Stress pattern ────────────────────────────────────────────────────
+        stress_streaks = {
+            eng['id']: _consecutive_weeks(
+                by_engineer.get(eng['id'], []), 'stress_level', STRESS_VALID
+            )
+            for eng in engineers
+        }
+        stress_affected = [eid for eid, streak in stress_streaks.items() if streak >= STRESS_THRESHOLD]
 
-        if stress_affected > 0 and (stress_affected / team_size) >= 0.5:
+        if stress_affected and (len(stress_affected) / total) >= 0.5:
             patterns.append({
                 'pattern_type': 'stress_pattern',
-                'affected_count': stress_affected,
-                'team_size': team_size,
-                'percentage': round((stress_affected / team_size) * 100),
-                'duration_weeks': 6,
+                'affected_count': len(stress_affected),
+                'total_engineers': total,
+                'duration_weeks': max(stress_streaks[eid] for eid in stress_affected),
+                'most_common_source': _most_common_source(
+                    stress_affected, by_engineer, 'stress_level', 'stress_source', STRESS_VALID
+                ),
             })
 
-        # ── Uncertainty pattern: all signals in last 21 days are 'High' ───────
-        uncertainty_affected = 0
-        for eng in engineers:
-            cursor.execute("""
-                SELECT uncertainty_level FROM signals
-                WHERE engineer_id = ?
-                  AND logged_at >= datetime('now', '-21 days')
-                ORDER BY logged_at DESC
-            """, (eng['id'],))
-            rows = [r['uncertainty_level'] for r in cursor.fetchall()]
-            if rows and all(u == 'High' for u in rows):
-                uncertainty_affected += 1
+        # ── Uncertainty pattern ───────────────────────────────────────────────
+        uncertainty_streaks = {
+            eng['id']: _consecutive_weeks(
+                by_engineer.get(eng['id'], []), 'uncertainty_level', UNCERTAINTY_VALID
+            )
+            for eng in engineers
+        }
+        uncertainty_affected = [
+            eid for eid, streak in uncertainty_streaks.items()
+            if streak >= UNCERTAINTY_THRESHOLD
+        ]
 
-        if uncertainty_affected > 0 and (uncertainty_affected / team_size) >= 0.5:
+        if uncertainty_affected and (len(uncertainty_affected) / total) >= 0.5:
             patterns.append({
                 'pattern_type': 'uncertainty_pattern',
-                'affected_count': uncertainty_affected,
-                'team_size': team_size,
-                'percentage': round((uncertainty_affected / team_size) * 100),
-                'duration_weeks': 3,
+                'affected_count': len(uncertainty_affected),
+                'total_engineers': total,
+                'duration_weeks': max(uncertainty_streaks[eid] for eid in uncertainty_affected),
+                'most_common_source': _most_common_source(
+                    uncertainty_affected, by_engineer,
+                    'uncertainty_level', 'uncertainty_source', UNCERTAINTY_VALID
+                ),
             })
 
-        conn.close()
         return patterns
 
     except Exception as e:

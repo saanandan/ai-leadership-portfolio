@@ -113,9 +113,10 @@ def build_brief_prompt(data):
         lines = ["TEAM-WIDE PATTERN ALERTS:"]
         for pattern in team_wide_patterns:
             label = FLAG_LABELS.get(pattern['pattern_type'], pattern['pattern_type'])
+            source_note = f" (most common source: {pattern['most_common_source']})" if pattern.get('most_common_source') else ''
             lines.append(
-                f"- {label}: {pattern['affected_count']} of {pattern['team_size']} engineers "
-                f"({pattern['percentage']}%) over the last {pattern['duration_weeks']} weeks"
+                f"- {label}: {pattern['affected_count']} of {pattern['total_engineers']} engineers "
+                f"for {pattern['duration_weeks']} consecutive weeks{source_note}"
             )
         sections.append('\n'.join(lines))
     else:
