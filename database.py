@@ -972,6 +972,235 @@ def get_active_trend_flags():
     return detect_trends()
 
 
+def save_brief(period_start, period_end, generated_content, edited_content=None):
+    """Insert a new brief record and return its id, or None on failure."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT INTO briefs (period_start, period_end, generated_content, edited_content)
+            VALUES (?, ?, ?, ?)
+        """, (str(period_start), str(period_end), generated_content, edited_content))
+
+        conn.commit()
+        new_id = cursor.lastrowid
+        conn.close()
+        return new_id
+
+    except Exception as e:
+        print(f"❌ Failed to save brief: {e}")
+        return None
+
+
+def update_brief_edited_content(brief_id, edited_content):
+    """Update the edited_content field of an existing brief. Returns True on success."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            UPDATE briefs SET edited_content = ? WHERE id = ?
+        """, (edited_content, brief_id))
+
+        conn.commit()
+        conn.close()
+        return True
+
+    except Exception as e:
+        print(f"❌ Failed to update brief edited content: {e}")
+        return False
+
+
+def get_all_briefs():
+    """Return all briefs in reverse chronological order.
+
+    Each row includes: id, period_start, period_end, generated_content,
+    edited_content, generated_at.
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT id, period_start, period_end, generated_content,
+                   edited_content, generated_at
+            FROM briefs
+            ORDER BY generated_at DESC
+        """)
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [dict(r) for r in rows]
+
+    except Exception as e:
+        print(f"❌ Failed to get briefs: {e}")
+        return []
+
+
+def detect_team_wide_patterns():
+    """Detect patterns where 50%+ of the team shows the same signal over an extended period.
+
+    Checks:
+    - stress_pattern:      50%+ of engineers with signals have High stress in every signal
+                           within the last 42 days (6 weeks)
+    - uncertainty_pattern: 50%+ of engineers with signals have High uncertainty in every signal
+                           within the last 21 days (3 weeks)
+
+    Returns a list of dicts: pattern_type, affected_count, team_size, percentage, duration_weeks.
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT id, name FROM engineers WHERE active = 1")
+        engineers = [dict(r) for r in cursor.fetchall()]
+        team_size = len(engineers)
+
+        if team_size == 0:
+            conn.close()
+            return []
+
+        patterns = []
+
+        # ── Stress pattern: all signals in last 42 days are 'High' ────────────
+        stress_affected = 0
+        for eng in engineers:
+            cursor.execute("""
+                SELECT stress_level FROM signals
+                WHERE engineer_id = ?
+                  AND logged_at >= datetime('now', '-42 days')
+                ORDER BY logged_at DESC
+            """, (eng['id'],))
+            rows = [r['stress_level'] for r in cursor.fetchall()]
+            if rows and all(s == 'High' for s in rows):
+                stress_affected += 1
+
+        if stress_affected > 0 and (stress_affected / team_size) >= 0.5:
+            patterns.append({
+                'pattern_type': 'stress_pattern',
+                'affected_count': stress_affected,
+                'team_size': team_size,
+                'percentage': round((stress_affected / team_size) * 100),
+                'duration_weeks': 6,
+            })
+
+        # ── Uncertainty pattern: all signals in last 21 days are 'High' ───────
+        uncertainty_affected = 0
+        for eng in engineers:
+            cursor.execute("""
+                SELECT uncertainty_level FROM signals
+                WHERE engineer_id = ?
+                  AND logged_at >= datetime('now', '-21 days')
+                ORDER BY logged_at DESC
+            """, (eng['id'],))
+            rows = [r['uncertainty_level'] for r in cursor.fetchall()]
+            if rows and all(u == 'High' for u in rows):
+                uncertainty_affected += 1
+
+        if uncertainty_affected > 0 and (uncertainty_affected / team_size) >= 0.5:
+            patterns.append({
+                'pattern_type': 'uncertainty_pattern',
+                'affected_count': uncertainty_affected,
+                'team_size': team_size,
+                'percentage': round((uncertainty_affected / team_size) * 100),
+                'duration_weeks': 3,
+            })
+
+        conn.close()
+        return patterns
+
+    except Exception as e:
+        print(f"❌ Failed to detect team-wide patterns: {e}")
+        return []
+
+
+def get_brief_data(start_date, end_date):
+    """Aggregate all data needed to generate a leadership brief for the given date range.
+
+    Returns a dict with:
+    - signals:              list of signal dicts (with engineer_name) in the date range
+    - metric_annotations:  list of the most recent annotation per active metric
+    - trend_flags:         list of active engineer trend flags (all time)
+    - metric_trend_flags:  list of active metric trend flags (all time)
+    - active_blockers:     list of unresolved blockers
+    - aging_blocker_ids:   set of blocker ids open for 14+ days
+    - team_wide_patterns:  list of team-wide pattern alerts
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # Signals in date range with engineer names
+        cursor.execute("""
+            SELECT s.*, e.name AS engineer_name
+            FROM signals s
+            JOIN engineers e ON s.engineer_id = e.id
+            WHERE DATE(s.logged_at) >= DATE(?)
+              AND DATE(s.logged_at) <= DATE(?)
+            ORDER BY s.logged_at DESC
+        """, (str(start_date), str(end_date)))
+        signals = [dict(r) for r in cursor.fetchall()]
+
+        # Most recent annotation per active metric
+        cursor.execute("""
+            SELECT ma.*, m.name AS metric_name, m.strategic_context,
+                   e.name AS remediation_owner_name
+            FROM metric_annotations ma
+            JOIN metrics m ON ma.metric_id = m.id
+            LEFT JOIN engineers e ON ma.remediation_owner_id = e.id
+            WHERE m.is_active = 1
+              AND ma.id = (
+                  SELECT id FROM metric_annotations
+                  WHERE metric_id = m.id
+                  ORDER BY annotated_at DESC
+                  LIMIT 1
+              )
+            ORDER BY ma.annotated_at DESC
+        """)
+        metric_annotations = [dict(r) for r in cursor.fetchall()]
+
+        # Active blockers
+        cursor.execute("""
+            SELECT * FROM manager_blockers
+            WHERE resolved = 0
+            ORDER BY open_since ASC
+        """)
+        active_blockers = [dict(r) for r in cursor.fetchall()]
+
+        # Aging blocker ids
+        cursor.execute("""
+            SELECT id FROM manager_blockers
+            WHERE resolved = 0
+              AND julianday('now') - julianday(open_since) >= 14
+        """)
+        aging_blocker_ids = {r['id'] for r in cursor.fetchall()}
+
+        conn.close()
+
+        return {
+            'signals': signals,
+            'metric_annotations': metric_annotations,
+            'trend_flags': detect_trends(),
+            'metric_trend_flags': detect_metric_trends(),
+            'active_blockers': active_blockers,
+            'aging_blocker_ids': aging_blocker_ids,
+            'team_wide_patterns': detect_team_wide_patterns(),
+        }
+
+    except Exception as e:
+        print(f"❌ Failed to get brief data: {e}")
+        return {
+            'signals': [],
+            'metric_annotations': [],
+            'trend_flags': [],
+            'metric_trend_flags': [],
+            'active_blockers': [],
+            'aging_blocker_ids': set(),
+            'team_wide_patterns': [],
+        }
+
+
 def initialize_database():
     """Initialize all database tables (will be expanded in future tasks)"""
     try:
