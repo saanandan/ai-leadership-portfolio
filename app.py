@@ -1,6 +1,14 @@
 import streamlit as st
-from database import get_connection, get_all_engineers, initialize_database
+import pandas as pd
+from datetime import datetime
+from database import (
+    get_connection, get_all_engineers, initialize_database,
+    get_latest_signal_per_engineer, get_latest_annotation_per_metric,
+    get_aging_blockers, get_active_trend_flags, get_metric_trend_flags,
+    detect_team_wide_patterns, get_all_metrics,
+)
 from dotenv import load_dotenv
+from components.navigation import show_navigation
 import os
 
 # Load environment variables
@@ -145,7 +153,7 @@ def show_onboarding():
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if st.button("🚀 Get Started", use_container_width=True, type="primary"):
+        if st.button("🚀 Get Started", width='stretch', type="primary"):
             if set_onboarding_complete():
                 st.success("Welcome! Setting up your team...")
                 st.rerun()
@@ -166,37 +174,12 @@ def show_main_app():
     )
     
     # Sidebar navigation
+    show_navigation()
+
     with st.sidebar:
-        st.markdown("# 🧭 Navigation")
-        
-        if st.button("🏠 Dashboard", use_container_width=True):
-            st.rerun()
-        
-        if st.button("📝 Signal Logging", use_container_width=True):
-            st.switch_page("pages/signal_logging.py")
-
-        if st.button("📊 Metric Annotation", use_container_width=True):
-            st.switch_page("pages/metric_annotation.py")
-
-        if st.button("🚧 Manager Blockers", use_container_width=True):
-            st.switch_page("pages/manager_blockers.py")
-
-        if st.button("📋 Generate Brief", use_container_width=True):
-            st.switch_page("pages/generate_brief.py")
-
-        if st.button("📈 History", use_container_width=True):
-            st.switch_page("pages/history.py")
-
-        if st.button("👥 Team Setup", use_container_width=True):
-            st.switch_page("pages/team_setup.py")
-        
-        st.markdown("---")
-        st.markdown("### 📊 Quick Actions")
-        st.markdown("*More features coming soon...*")
-        
         st.markdown("---")
         st.markdown("### ⚙️ Settings")
-        if st.button("🔄 Reset Onboarding", use_container_width=True, help="For testing only"):
+        if st.button("🔄 Reset Onboarding", width='stretch', help="For testing only"):
             conn = get_connection()
             cursor = conn.cursor()
             cursor.execute("DELETE FROM app_state WHERE key = 'onboarding_complete'")
@@ -209,32 +192,152 @@ def show_main_app():
     
     if engineers:
         st.markdown("# 📊 Engineering Leadership Signal Tool")
-        st.markdown("Welcome back! Your dashboard will appear here.")
-        
-        st.success(f"Found {len(engineers)} active engineers in your team.")
-        
-        # Display current team
-        st.markdown("## 👥 Your Team")
-        cols = st.columns(min(3, len(engineers)))
-        
-        for i, engineer in enumerate(engineers):
-            with cols[i % 3]:
-                st.markdown(f"### {engineer['name']}")
-                if engineer.get('role') and engineer['role'].strip():
-                    st.markdown(f"🏷️ {engineer['role']}")
-                else:
-                    st.markdown("🏷️ *No role specified*")
-        
-        # Placeholder for future dashboard features
         st.markdown("---")
-        st.markdown("## 🚀 Coming Soon")
-        st.markdown("""
-        - **Signal Logging** - Capture human signals from 1:1 meetings
-        - **Metrics Annotation** - Add context to operational metrics  
-        - **Weekly Briefs** - AI-generated leadership insights
-        - **Trend Detection** - Automatic pattern recognition
-        - **Historical Analysis** - Team evolution over time
-        """)
+
+        # ── Fetch all dashboard data ────────────────────────────────────────
+        latest_signals = get_latest_signal_per_engineer()
+        signal_by_engineer = {s['engineer_id']: s for s in latest_signals}
+
+        trend_flags = get_active_trend_flags()
+        flags_by_engineer = {}
+        for flag in trend_flags:
+            flags_by_engineer.setdefault(flag['engineer_id'], []).append(flag['flag_type'])
+
+        patterns = detect_team_wide_patterns()
+        aging_blockers_list = get_aging_blockers()
+        latest_annotations = get_latest_annotation_per_metric()
+        ann_by_metric = {a['metric_id']: a for a in latest_annotations}
+        all_metrics = get_all_metrics()
+        metric_flags = get_metric_trend_flags()
+
+        # ── Alert Banners ───────────────────────────────────────────────────
+        for pattern in patterns:
+            label = "Team-Wide Stress Alert" if pattern['pattern_type'] == 'stress_pattern' else "Team-Wide Uncertainty Alert"
+            source = f" — source: {pattern['most_common_source']}" if pattern.get('most_common_source') else ""
+            st.warning(
+                f"⚠️ **{label}:** {pattern['affected_count']} of {pattern['total_engineers']} engineers "
+                f"for {pattern['duration_weeks']} consecutive weeks{source}"
+            )
+        for blocker in aging_blockers_list:
+            try:
+                open_dt = datetime.strptime(blocker['open_since'], "%Y-%m-%d").strftime("%B %d, %Y")
+            except Exception:
+                open_dt = blocker['open_since']
+            st.error(f"🔴 **Aging Blocker:** \"{blocker['description']}\" — open since {open_dt}")
+
+        # ── Panel 1: Team Signal Status ─────────────────────────────────────
+        st.markdown("## Team Signal Status")
+        st.caption("Most recent signal logged per engineer")
+
+        DELIVERY_EMOJI = {'On Track': '✅', 'At Risk': '⚠️', 'Blocked': '🔴'}
+        STRESS_EMOJI = {'Low': '😌', 'Moderate': '😐', 'High': '😰'}
+        GROWTH_EMOJI = {'Growing': '🌱', 'Coasting': '➡️', 'Struggling': '📉'}
+
+        rows = []
+        for engineer in engineers:
+            eid = engineer['id']
+            sig = signal_by_engineer.get(eid)
+            flag_count = len(flags_by_engineer.get(eid, []))
+
+            if sig:
+                delivery = DELIVERY_EMOJI.get(sig['delivery_signal'], '') + ' ' + sig['delivery_signal']
+                stress = STRESS_EMOJI.get(sig['stress_level'], '') + ' ' + sig['stress_level']
+                growth = GROWTH_EMOJI.get(sig['growth_signal'], '') + ' ' + sig['growth_signal']
+                energy = f"🔋 {sig['energy_level']}/5"
+                logged = sig['logged_at'][:10]
+            else:
+                delivery = stress = growth = energy = "—"
+                logged = "No signal yet"
+
+            rows.append({
+                'Engineer': engineer['name'],
+                'Last Signal': logged,
+                'Energy': energy,
+                'Delivery': delivery,
+                'Stress': stress,
+                'Growth': growth,
+                'Flags': str(flag_count) if flag_count > 0 else "—",
+            })
+
+        st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
+
+        st.divider()
+
+        # ── Panel 2: Metric Status ───────────────────────────────────────────
+        st.markdown("## Metric Status")
+        st.caption("Latest annotation per operational metric")
+
+        CLASS_EMOJI = {'Red': '🔴', 'Orange': '🟠', 'Amber': '⚠️'}
+
+        if not all_metrics:
+            st.info("No metrics configured.")
+        else:
+            for metric in all_metrics:
+                ann = ann_by_metric.get(metric['id'])
+                if ann:
+                    emoji = CLASS_EMOJI.get(ann['classification'], '⬜')
+                    st.markdown(f"{emoji} **{metric['name']}** — {ann['current_value']}")
+                    preview = ann['explanation'][:80]
+                    if len(ann['explanation']) > 80:
+                        preview += "..."
+                    st.caption(preview)
+                else:
+                    st.markdown(f"⬜ **{metric['name']}** — *No annotation yet*")
+                st.markdown("")
+
+        st.divider()
+
+        # ── Panel 3: Active Flags ────────────────────────────────────────────
+        st.markdown("## Active Flags")
+        st.caption("Items requiring your attention right now")
+
+        FLAG_LABELS = {
+            'stress_trend': ('⚠️', 'stress trend'),
+            'uncertainty_trend': ('⚠️', 'uncertainty trend'),
+            'delivery_trend': ('🔴', 'delivery at risk'),
+            'energy_trend': ('⚠️', 'low energy trend'),
+        }
+        METRIC_FLAG_LABELS = {
+            'sustained_red': ('🔴', 'sustained red'),
+            'improving_trend': ('📈', 'improving trend'),
+            'sustained_improvement': ('✅', 'sustained improvement'),
+        }
+
+        has_any = bool(trend_flags or metric_flags)
+
+        for flag in trend_flags:
+            emoji, label = FLAG_LABELS.get(flag['flag_type'], ('⚠️', flag['flag_type']))
+            st.markdown(f"{emoji} **{flag['engineer_name']}** — {label} ({flag['duration']} check-ins)")
+
+        if trend_flags and metric_flags:
+            st.markdown("---")
+
+        for flag in metric_flags:
+            emoji, label = METRIC_FLAG_LABELS.get(flag['flag_type'], ('⚠️', flag['flag_type']))
+            st.markdown(f"{emoji} **{flag['metric_name']}** — {label} ({flag['duration']} annotations)")
+
+        if not has_any:
+            st.info("No active flags. Team is on track.")
+
+        st.divider()
+
+        # ── Panel 4: Quick Actions ───────────────────────────────────────────
+        st.markdown("## Quick Actions")
+        st.caption("Common actions")
+
+        qa_col1, qa_col2, qa_col3, qa_col4 = st.columns(4)
+        with qa_col1:
+            if st.button("📝 Log Signal", width='stretch', type="primary"):
+                st.switch_page("pages/signal_logging.py")
+        with qa_col2:
+            if st.button("📊 Annotate Metric", width='stretch'):
+                st.switch_page("pages/metric_annotation.py")
+        with qa_col3:
+            if st.button("🚧 Log Blocker", width='stretch'):
+                st.switch_page("pages/manager_blockers.py")
+        with qa_col4:
+            if st.button("📋 Generate Brief", width='stretch'):
+                st.switch_page("pages/generate_brief.py")
         
     else:
         st.markdown("# 📊 Engineering Leadership Signal Tool")
@@ -250,7 +353,7 @@ def show_main_app():
         
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            if st.button("👥 Set Up Your Team", use_container_width=True, type="primary"):
+            if st.button("👥 Set Up Your Team", width='stretch', type="primary"):
                 st.switch_page("pages/team_setup.py")
         
         st.markdown("---")

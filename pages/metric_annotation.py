@@ -6,6 +6,7 @@ from database import (
     get_metric_annotations,
 )
 from datetime import datetime
+from components.navigation import show_navigation
 
 
 def show_metric_annotation():
@@ -15,6 +16,7 @@ def show_metric_annotation():
         page_icon="📊",
         layout="wide"
     )
+    show_navigation()
 
     # Initialize session state
     if 'metric_action_message' not in st.session_state:
@@ -142,7 +144,7 @@ def show_metric_annotation():
         col_confirm, col_cancel, _ = st.columns([1, 1, 4])
 
         with col_confirm:
-            if st.button("Yes, remove it", type="primary", use_container_width=True):
+            if st.button("Yes, remove it", type="primary", width='stretch'):
                 success = deactivate_metric(st.session_state.confirm_remove_id)
                 if success:
                     st.session_state.metric_action_message = (
@@ -159,7 +161,7 @@ def show_metric_annotation():
                 st.rerun()
 
         with col_cancel:
-            if st.button("Cancel", use_container_width=True):
+            if st.button("Cancel", width='stretch'):
                 st.session_state.confirm_remove_id = None
                 st.session_state.confirm_remove_name = None
                 st.rerun()

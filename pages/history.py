@@ -5,6 +5,7 @@ import pandas as pd
 from datetime import date, timedelta, datetime
 import anthropic
 
+from components.navigation import show_navigation
 from database import (
     get_all_engineers,
     get_signals,
@@ -638,6 +639,7 @@ def show_history():
         page_icon="📈",
         layout="wide",
     )
+    show_navigation()
 
     # Session state for retrospective
     for key, default in [

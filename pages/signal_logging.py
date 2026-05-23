@@ -1,6 +1,7 @@
 import streamlit as st
 from database import get_all_engineers, save_signal, delete_signal, get_signals
 from datetime import datetime, timedelta, date
+from components.navigation import show_navigation
 
 def show_signal_logging():
     """Display signal logging screen"""
@@ -9,6 +10,7 @@ def show_signal_logging():
         page_icon="📝",
         layout="wide"
     )
+    show_navigation()
     
     # Initialize session state
     if 'signal_saved' not in st.session_state:
@@ -200,7 +202,7 @@ def show_signal_logging():
             col_a, col_b = st.columns(2)
             
             with col_a:
-                if st.button("� Log Another Signal", use_container_width=True, type="primary"):
+                if st.button("� Log Another Signal", width='stretch', type="primary"):
                     # Clear session state and form
                     st.session_state.signal_saved = False
                     st.session_state.saved_signal_id = None
@@ -215,7 +217,7 @@ def show_signal_logging():
             
             with col_b:
                 if can_undo:
-                    if st.button("↩️ Undo this entry", use_container_width=True):
+                    if st.button("↩️ Undo this entry", width='stretch'):
                         if st.session_state.saved_signal_id:
                             if delete_signal(st.session_state.saved_signal_id):
                                 st.success("✅ Signal deleted successfully!")
@@ -242,7 +244,7 @@ def show_signal_logging():
             col_a, col_b = st.columns(2)
             
             with col_a:
-                if st.button("🔙 Cancel", use_container_width=True):
+                if st.button("🔙 Cancel", width='stretch'):
                     # Clear all form fields by deleting their session state
                     for key in st.session_state.keys():
                         if key in ['engineer_select', 'energy_level', 'delivery_signal', 'growth_signal', 
@@ -251,7 +253,7 @@ def show_signal_logging():
                     st.rerun()
             
             with col_b:
-                if st.button("�💾 Save Signal", use_container_width=True, type="primary"):
+                if st.button("�💾 Save Signal", width='stretch', type="primary"):
                     # Validation
                     if not selected_engineer:
                         st.error("❌ Please select an engineer.")
@@ -377,7 +379,7 @@ def show_signal_logging():
                 "Observation": s['observation'] or "",
             })
 
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+        st.dataframe(rows, width='stretch', hide_index=True)
 
 
 if __name__ == "__main__":

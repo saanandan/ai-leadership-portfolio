@@ -4,6 +4,7 @@ from database import (
     detect_aging_blockers, resolve_blocker,
 )
 from datetime import date, datetime
+from components.navigation import show_navigation
 
 
 ESCALATION_OPTIONS = [
@@ -21,6 +22,7 @@ def show_manager_blockers():
         page_icon="🚧",
         layout="wide"
     )
+    show_navigation()
 
     if 'blocker_saved' not in st.session_state:
         st.session_state.blocker_saved = None  # ('success'|'error', text)

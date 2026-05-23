@@ -1,5 +1,6 @@
 import streamlit as st
 from database import get_all_engineers, add_engineer, deactivate_engineer
+from components.navigation import show_navigation
 
 def show_team_setup():
     """Display the team setup screen"""
@@ -8,6 +9,7 @@ def show_team_setup():
         page_icon="👥",
         layout="wide"
     )
+    show_navigation()
     
     st.markdown("# 👥 Team Setup")
     st.markdown("Add and manage your engineering team members here.")
@@ -38,7 +40,7 @@ def show_team_setup():
         
         add_button = st.button(
             "➕ Add Engineer",
-            use_container_width=True,
+            width='stretch',
             type="primary",
             disabled=not engineer_name.strip()
         )
@@ -83,7 +85,7 @@ def show_team_setup():
                         "🗑️ Remove",
                         key=remove_key,
                         help="Deactivate this engineer (won't delete historical data)",
-                        use_container_width=True
+                        width='stretch'
                     ):
                         if deactivate_engineer(engineer['id']):
                             st.success(f"✅ Engineer '{engineer['name']}' deactivated successfully!")
@@ -110,7 +112,7 @@ def show_team_setup():
     st.markdown("---")
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if st.button("🏠 Back to Dashboard", use_container_width=True):
+        if st.button("🏠 Back to Dashboard", width='stretch'):
             st.switch_page("app.py")
 
 if __name__ == "__main__":

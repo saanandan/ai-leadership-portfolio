@@ -1245,6 +1245,69 @@ def detect_team_wide_patterns():
         return []
 
 
+def get_latest_signal_per_engineer():
+    """Return the most recent signal for each active engineer, ordered by engineer name."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT s.*, e.name AS engineer_name
+            FROM signals s
+            JOIN engineers e ON s.engineer_id = e.id
+            INNER JOIN (
+                SELECT engineer_id, MAX(logged_at) AS max_logged_at
+                FROM signals
+                GROUP BY engineer_id
+            ) latest ON s.engineer_id = latest.engineer_id
+              AND s.logged_at = latest.max_logged_at
+            WHERE e.active = 1
+            ORDER BY e.name
+        """)
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    except Exception as e:
+        print(f"❌ Failed to get latest signals per engineer: {e}")
+        return []
+
+
+def get_latest_annotation_per_metric():
+    """Return the most recent annotation for each active metric, ordered by metric name."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT ma.*, m.name AS metric_name, m.strategic_context,
+                   e.name AS remediation_owner_name
+            FROM metric_annotations ma
+            JOIN metrics m ON ma.metric_id = m.id
+            LEFT JOIN engineers e ON ma.remediation_owner_id = e.id
+            WHERE m.is_active = 1
+              AND ma.id = (
+                  SELECT id FROM metric_annotations
+                  WHERE metric_id = m.id
+                  ORDER BY annotated_at DESC
+                  LIMIT 1
+              )
+            ORDER BY m.name
+        """)
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    except Exception as e:
+        print(f"❌ Failed to get latest annotation per metric: {e}")
+        return []
+
+
+def get_aging_blockers():
+    """Return all unresolved blockers open for 14 or more days."""
+    return detect_aging_blockers()
+
+
 def get_brief_data(start_date, end_date):
     """Aggregate all data needed to generate a leadership brief for the given date range.
 

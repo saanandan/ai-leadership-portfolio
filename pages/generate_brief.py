@@ -8,6 +8,7 @@ from database import (
     get_brief_data, save_brief, update_brief_edited_content, get_all_briefs,
 )
 from prompts.brief_prompt import build_brief_prompt
+from components.navigation import show_navigation
 
 
 SYSTEM_PROMPT = """You are an expert engineering leadership coach helping a manager communicate clearly and confidently with senior leadership.
@@ -108,6 +109,7 @@ def show_generate_brief():
         page_icon="📋",
         layout="wide"
     )
+    show_navigation()
 
     for key, default in [
         ('brief_content', None),
