@@ -89,11 +89,8 @@ def show_onboarding():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         if st.button("🚀 Get Started", width='stretch', type="primary"):
-            if set_onboarding_complete():
-                st.success("Welcome! Setting up your team...")
-                st.rerun()
-            else:
-                st.error("Failed to save your progress. Please try again.")
+            set_onboarding_complete()
+            st.rerun()
 
 def show_main_app():
     """Display the main application after onboarding"""

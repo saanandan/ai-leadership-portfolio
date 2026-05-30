@@ -252,19 +252,17 @@ BLOCKERS = [
 ]
 
 
-def seed():
-    print("=" * 55)
-    print("  Team Signal Translator — Mock Data Seeder")
-    print("=" * 55)
+def run_seed():
+    """Run the full seed silently and return insertion counts.
 
-    # Ensure all tables exist
-    print("\nInitialising database...")
+    Wipes all tables, re-seeds default metrics, then inserts all mock data.
+    Returns dict with keys: engineers, signals, annotations, blockers.
+    """
     initialize_database()
 
     conn = get_connection()
     cursor = conn.cursor()
 
-    # Wipe all tables in dependency-safe order, then re-seed default metrics
     for table in (
         "signals",
         "metric_annotations",
@@ -282,24 +280,17 @@ def seed():
     from database import seed_default_metrics
     seed_default_metrics()
 
-    # Look up default metric IDs after re-seeding
     cursor.execute("SELECT id, name FROM metrics WHERE is_default = 1")
     metrics = {row["name"]: row["id"] for row in cursor.fetchall()}
 
-    print("\n🧹 Database cleaned")
-
-    # ── Engineers ─────────────────────────────────────────────────────────────
-    print("── Engineers ─────────────────────────────────────────")
+    # Engineers
     engineer_ids = {}
     for name, role in ENGINEERS:
         cursor.execute("INSERT INTO engineers (name, role) VALUES (?, ?)", (name, role))
-        eid = cursor.lastrowid
-        engineer_ids[name] = eid
-        print(f"  ✅  {name:<22}  {role:<22}  [id={eid}]")
+        engineer_ids[name] = cursor.lastrowid
     conn.commit()
 
-    # ── Signals ───────────────────────────────────────────────────────────────
-    print(f"\n── Signals ({len(SIGNAL_WEEKS)} weeks × {len(ENGINEERS)} engineers) ──────────────────")
+    # Signals
     signal_count = 0
     for name, weekly_signals in SIGNAL_DATA.items():
         eid = engineer_ids[name]
@@ -322,18 +313,13 @@ def seed():
                 ),
             )
             signal_count += 1
-        print(f"  ✅  {name:<22}  8 signals inserted")
     conn.commit()
-    print(f"  Total: {signal_count} signals")
 
-    # ── Metric annotations ────────────────────────────────────────────────────
-    print(f"\n── Metric Annotations ({len(SIGNAL_WEEKS)} weeks × 4 metrics) ────────────")
-
+    # Metric annotations
     annotation_count = 0
     for metric_name, annotations in ANNOTATION_DATA.items():
         mid = metrics.get(metric_name)
         if mid is None:
-            print(f"  ⚠️  Metric '{metric_name}' not found — skipping")
             continue
         for week_idx, (value, classification, explanation) in enumerate(annotations):
             annotated_at = SIGNAL_WEEKS[week_idx].isoformat() + " 10:00:00"
@@ -346,34 +332,24 @@ def seed():
                 (mid, value, classification, explanation, annotated_at),
             )
             annotation_count += 1
-        latest_classification = annotations[-1][1]
-        latest_value = annotations[-1][0]
-        print(f"  ✅  {metric_name:<30}  8 annotations  (latest: {latest_classification} {latest_value})")
     conn.commit()
-    print(f"  Total: {annotation_count} annotations")
 
-    # ── Strategic context ─────────────────────────────────────────────────────
-    print("\n── Strategic Context ─────────────────────────────────")
+    # Strategic context
     for metric_name, ctx in STRATEGIC_CONTEXTS.items():
         mid = metrics.get(metric_name)
-        if mid is None:
-            continue
-        cursor.execute(
-            """
-            UPDATE metrics
-            SET strategic_context = ?, strategic_context_updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            """,
-            (ctx, mid),
-        )
-        print(f"  ✅  {metric_name}")
+        if mid:
+            cursor.execute(
+                """
+                UPDATE metrics
+                SET strategic_context = ?, strategic_context_updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (ctx, mid),
+            )
     conn.commit()
 
-    # ── Manager blockers ──────────────────────────────────────────────────────
-    print("\n── Manager Blockers ──────────────────────────────────")
+    # Manager blockers
     blocker_count = 0
-    resolved_count = 0
-    open_count = 0
     for b in BLOCKERS:
         cursor.execute(
             """
@@ -390,30 +366,35 @@ def seed():
                 b["resolved_at"], b["resolution_description"],
             ),
         )
-        bid = cursor.lastrowid
-        status = "Resolved" if b["resolved"] else "Open    "
-        short_desc = b["description"][:52] + ("..." if len(b["description"]) > 52 else "")
-        open_since = b["open_since"]
-        print(f"  ✅  [{status}]  {short_desc:<55}  open_since={open_since}  [id={bid}]")
         blocker_count += 1
-        if b["resolved"]:
-            resolved_count += 1
-        else:
-            open_count += 1
     conn.commit()
 
     conn.close()
 
-    # ── Summary ───────────────────────────────────────────────────────────────
+    return {
+        "engineers":   len(ENGINEERS),
+        "signals":     signal_count,
+        "annotations": annotation_count,
+        "blockers":    blocker_count,
+    }
+
+
+def seed():
+    print("=" * 55)
+    print("  Team Signal Translator — Mock Data Seeder")
+    print("=" * 55)
+
+    counts = run_seed()
+
     print("\n" + "=" * 55)
     print("  Seeding complete!")
     print("=" * 55)
-    print(f"  Engineers           {len(ENGINEERS):>4}")
-    print(f"  Signals             {signal_count:>4}   ({len(ENGINEERS)} engineers × 8 weeks)")
-    print(f"  Metric annotations  {annotation_count:>4}   (4 metrics × 8 weeks)")
-    print(f"  Manager blockers    {blocker_count:>4}   ({resolved_count} resolved, {open_count} open)")
+    print(f"  Engineers           {counts['engineers']:>4}")
+    print(f"  Signals             {counts['signals']:>4}   ({counts['engineers']} engineers × 8 weeks)")
+    print(f"  Metric annotations  {counts['annotations']:>4}   (4 metrics × 8 weeks)")
+    print(f"  Manager blockers    {counts['blockers']:>4}")
     print("=" * 55)
-    print("\nDate range covered:")
+    print(f"\nDate range covered:")
     print(f"  Oldest signal:  {SIGNAL_WEEKS[0].isoformat()}")
     print(f"  Newest signal:  {SIGNAL_WEEKS[-1].isoformat()}")
     print(f"  Reference date: {TODAY.isoformat()}")
