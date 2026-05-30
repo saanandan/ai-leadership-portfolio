@@ -232,11 +232,66 @@ def show_metric_annotation():
             key="ann_metric",
         )
 
-        ann_value = st.text_input(
-            "Current Value *",
-            placeholder="e.g. 60%, 12 open vulns, 94%",
-            help="Enter the current value of this metric e.g. 60%, 12 open vulns, 94%",
-            key="ann_value",
+        is_prod_incidents = ann_metric is not None and ann_metric['name'] == "Production Incidents"
+
+        # ── Production Incidents special fields ───────────────────────────
+        pi_severity = pi_count = pi_ownership = pi_owning_team = pi_status = None
+        ann_value = ""
+
+        if is_prod_incidents:
+            pi_severity = st.selectbox(
+                "Severity *",
+                options=["P1 — Critical", "P2 — High", "P3 — Medium"],
+                help="P1 = customer impacting, P2 = degraded experience, P3 = minor issue",
+                key="pi_severity",
+            )
+            pi_count = st.number_input(
+                "Incident Count *",
+                min_value=0,
+                step=1,
+                value=0,
+                help="How many incidents of this severity occurred this period?",
+                key="pi_count",
+            )
+            pi_ownership = st.selectbox(
+                "Ownership *",
+                options=[
+                    "My team is responsible",
+                    "Dependency failure — we were impacted",
+                    "Shared responsibility",
+                ],
+                help="Ownership determines accountability and escalation path. Be honest — this data protects you when it matters.",
+                key="pi_ownership",
+            )
+            if pi_ownership == "Dependency failure — we were impacted":
+                pi_owning_team = st.text_input(
+                    "Which team owns this? *",
+                    placeholder="e.g. Platform team, Data pipeline team",
+                    help="Name the team. Escalation requires specificity.",
+                    key="pi_owning_team",
+                )
+            pi_status = st.selectbox(
+                "Status *",
+                options=["All resolved", "In progress", "Root cause analysis pending"],
+                help="Leadership needs to know if anything is still open",
+                key="pi_status",
+            )
+            severity_code = pi_severity.split(" — ")[0]
+            ann_value = f"{int(pi_count)} {severity_code} incident{'s' if int(pi_count) != 1 else ''}"
+        else:
+            ann_value = st.text_input(
+                "Current Value *",
+                placeholder="e.g. 60%, 12 open vulns, 94%",
+                help="Enter the current value of this metric e.g. 60%, 12 open vulns, 94%",
+                key="ann_value",
+            )
+
+        # ── Shared fields ─────────────────────────────────────────────────
+        ann_target = st.text_input(
+            "Target Value",
+            placeholder="e.g. 95%, less than 5 open vulns, 99.9% uptime",
+            help="What should this metric be? e.g. 95%, less than 5 open vulns, 99.9% uptime. Knowing the target makes the current value meaningful.",
+            key="ann_target",
         )
 
         ann_classification = st.selectbox(
@@ -289,10 +344,12 @@ def show_metric_annotation():
 
             if ann_metric is None:
                 errors.append("Metric is required.")
-            if not ann_value.strip():
-                errors.append("Current value is required.")
-            if not ann_classification:
-                errors.append("Classification is required.")
+            if is_prod_incidents:
+                if pi_ownership == "Dependency failure — we were impacted" and not (pi_owning_team or "").strip():
+                    errors.append("Owning team name is required when ownership is 'Dependency failure'.")
+            else:
+                if not ann_value.strip():
+                    errors.append("Current value is required.")
             if not ann_explanation.strip():
                 errors.append("Plain English explanation is required.")
             if is_red and ann_owner_id is None:
@@ -302,14 +359,28 @@ def show_metric_annotation():
                 for err in errors:
                     st.error(f"❌ {err}")
             else:
+                # For Production Incidents, prepend structured metadata to the explanation
+                stored_explanation = ann_explanation.strip()
+                if is_prod_incidents:
+                    meta = [
+                        f"Severity: {pi_severity}",
+                        f"Count: {int(pi_count)}",
+                        f"Ownership: {pi_ownership}",
+                    ]
+                    if pi_owning_team and pi_owning_team.strip():
+                        meta.append(f"Owning team: {pi_owning_team.strip()}")
+                    meta.append(f"Status: {pi_status}")
+                    stored_explanation = " · ".join(meta) + "\n\n" + stored_explanation
+
                 stored_class = CLASSIFICATION_STORED[chosen_colour]
                 new_id = save_annotation(
                     metric_id=ann_metric['id'],
-                    current_value=ann_value.strip(),
+                    current_value=ann_value,
                     classification=stored_class,
-                    explanation=ann_explanation.strip(),
+                    explanation=stored_explanation,
                     remediation_owner_id=ann_owner_id,
                     expected_resolution_date=str(ann_resolution_date) if ann_resolution_date else None,
+                    target_value=ann_target.strip() or None,
                 )
                 if new_id:
                     st.session_state.metric_action_message = (
@@ -376,7 +447,10 @@ def show_metric_annotation():
                     with st.container(border=True):
                         h_col, d_col = st.columns([3, 2])
                         with h_col:
-                            st.markdown(f"**{emoji} {cls}** — {ann['current_value']}")
+                            value_line = ann['current_value']
+                            if ann.get('target_value'):
+                                value_line += f" (target: {ann['target_value']})"
+                            st.markdown(f"**{emoji} {cls}** — {value_line}")
                             st.caption(f"{label} · {ann_dt}")
                         with d_col:
                             if ann.get('remediation_owner_name'):
@@ -398,6 +472,8 @@ def show_metric_annotation():
 
                         with st.expander(f"{emoji} {cls} — {ann['current_value']} · {ann_dt}"):
                             st.markdown(ann['explanation'])
+                            if ann.get('target_value'):
+                                st.caption(f"Target: {ann['target_value']}")
                             if ann.get('remediation_owner_name'):
                                 st.caption(f"Owner: {ann['remediation_owner_name']}")
                             if ann.get('expected_resolution_date'):

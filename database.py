@@ -367,16 +367,17 @@ def deactivate_engineer(engineer_id):
         return False
 
 def seed_default_metrics():
-    """Inserts four default metrics if they don't already exist"""
+    """Inserts five default metrics if they don't already exist"""
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        
+
         default_metrics = [
             ("CICD Health", "Overall health and reliability of the CI/CD pipeline including release frequency, build success rate, and pipeline reliability"),
             ("Vuln Remediation", "Time to fix security vulnerabilities — tracks open vulns, remediation velocity, and SLA compliance"),
             ("Deployment Success Rate", "Percentage of deployments that complete successfully without rollback or incident"),
             ("Test Coverage", "Percentage of codebase covered by automated tests — unit, integration, and end-to-end"),
+            ("Production Incidents", "Track production incidents by severity, ownership, and resolution status"),
         ]
         
         for name, description in default_metrics:
@@ -398,7 +399,7 @@ def seed_default_metrics():
         print(f"❌ Failed to seed default metrics: {e}")
         return False
 
-def save_annotation(metric_id, current_value, classification, explanation, remediation_owner_id=None, expected_resolution_date=None):
+def save_annotation(metric_id, current_value, classification, explanation, remediation_owner_id=None, expected_resolution_date=None, target_value=None):
     """Insert a new metric annotation and return its id, or None on failure."""
     try:
         conn = get_connection()
@@ -406,9 +407,9 @@ def save_annotation(metric_id, current_value, classification, explanation, remed
 
         cursor.execute("""
             INSERT INTO metric_annotations
-                (metric_id, current_value, classification, explanation, remediation_owner_id, expected_resolution_date)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (metric_id, current_value, classification, explanation, remediation_owner_id, expected_resolution_date))
+                (metric_id, current_value, target_value, classification, explanation, remediation_owner_id, expected_resolution_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (metric_id, current_value, target_value, classification, explanation, remediation_owner_id, expected_resolution_date))
 
         conn.commit()
         new_id = cursor.lastrowid
@@ -1424,7 +1425,19 @@ def initialize_database():
         # Seed default data
         if not seed_default_metrics():
             raise Exception("Failed to seed default metrics")
-        
+
+        # Schema migrations — safe to run repeatedly
+        conn = get_connection()
+        try:
+            conn.execute(
+                "ALTER TABLE metric_annotations ADD COLUMN target_value TEXT"
+            )
+            conn.commit()
+        except Exception:
+            pass  # column already exists
+        finally:
+            conn.close()
+
         print("✅ Database initialized successfully!")
         return True
         
