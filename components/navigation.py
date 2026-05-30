@@ -9,6 +9,7 @@ NAV_ITEMS = [
     ("📋 Generate Brief",    "pages/generate_brief.py"),
     ("📈 History",           "pages/history.py"),
     ("👥 Team Setup",        "pages/team_setup.py"),
+    ("ℹ️ About",             "pages/about.py"),
 ]
 
 

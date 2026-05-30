@@ -59,98 +59,33 @@ def show_onboarding():
         initial_sidebar_state="expanded"
     )
     
-    # Header
     st.markdown("# 📊 Engineering Leadership Signal Tool")
     st.markdown("---")
-    
-    # What the tool is and why it exists
-    st.markdown("## Welcome! 👋")
-    st.markdown("""
-    **What this tool is:** A structured way to capture the human signals behind your team's performance data.
-    
-    **Why it exists:** Engineering leaders are expected to explain operational metrics in business reviews, 
-    but the human context gets lost. By the time the review happens, the context is gone — discussed 
-    in a meeting, stored in someone's head, or buried in a Slack thread. Leadership makes decisions 
-    based on numbers without the story behind them.
-    
-    This tool solves that by maintaining a persistent record of human signals and metric context over time.
-    """)
-    
-    # The five signals explanation
-    st.markdown("## The Five Human Signals")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("### 🔋 Energy Level (1-5)")
-        st.markdown("""
-        **What it measures:** How present and energized is this engineer today?
-        
-        **Scale:** 1 = Depleted, 5 = Highly energized
-        
-        **Why it matters:** Energy is the foundation of sustainable performance. 
-        Low energy over time indicates burnout risk or disengagement.
-        """)
-        
-        st.markdown("### 🚀 Delivery Signal")
-        st.markdown("""
-        **What it measures:** Are they on track with their current commitments?
-        
-        **Options:** On Track, At Risk, Blocked
-        
-        **Why it matters:** Delivery risk needs early intervention. 
-        "Blocked" requires immediate action, "At Risk" needs attention.
-        """)
-        
-        st.markdown("### 🌱 Growth Signal")
-        st.markdown("""
-        **What it measures:** Are they developing professionally or showing signs of stagnation?
-        
-        **Options:** Growing, Coasting, Struggling
-        
-        **Why it matters:** Professional growth prevents stagnation and builds future capability. 
-        "Struggling" may need coaching support, "Coasting" may need new challenges.
-        """)
-    
-    with col2:
-        st.markdown("### 😰 Stress Level")
-        st.markdown("""
-        **What it measures:** Is this engineer under pressure beyond normal levels?
-        
-        **Options:** Low, Moderate, High
-        
-        **Why it matters:** Chronic stress leads to burnout and attrition. 
-        High stress requires understanding the source and appropriate management response.
-        """)
-        
-        st.markdown("### ❓ Uncertainty Level")
-        st.markdown("""
-        **What it measures:** Does this engineer feel unclear about direction or priorities?
-        
-        **Options:** Low, Moderate, High
-        
-        **Why it matters:** Uncertainty paralyzes action and creates anxiety. 
-        High uncertainty indicates need for clearer communication or decision-making.
-        """)
-    
-    # How automatic trend detection works
-    st.markdown("## 📈 Automatic Trend Detection")
-    st.markdown("""
-    This tool automatically detects patterns that might otherwise stay invisible:
-    
-    - **Stress Trends:** High stress for 3+ consecutive check-ins triggers an alert
-    - **Uncertainty Trends:** High uncertainty for 2+ consecutive check-ins triggers an alert  
-    - **Delivery Trends:** "At Risk" or "Blocked" for 2+ consecutive check-ins triggers an alert
-    - **Energy Trends:** Average energy below 3 for 3+ check-ins in 30 days triggers an alert
-    - **Team-wide Patterns:** When 50%+ of your team shows the same signal for extended periods
-    
-    These trends appear in your dashboard and weekly briefs, helping you act proactively 
-    rather than reactively.
-    """)
-    
-    # Get Started button
+
+    st.markdown("### People leadership still matters.")
+    st.markdown(
+        "AI is changing how fast we build. It is not changing the fact that humans build it. "
+        "The signals that predict team health — energy, stress, uncertainty, growth — live in 1:1 conversations, "
+        "not dashboards. This tool captures them consistently so nothing gets lost."
+    )
+
+    st.markdown("### Context is what makes data useful.")
+    st.markdown(
+        "A metric without context is just a number. 60% vuln remediation looks alarming. "
+        "It looks different when you know the system is being retired next quarter. "
+        "This tool lets you attach the human context to every metric at the point of observation "
+        "— so leadership sees the story, not just the number."
+    )
+
+    st.markdown("### If everything is equally important, nothing is.")
+    st.markdown(
+        "This tool automatically detects patterns that matter — sustained stress, aging blockers, "
+        "metrics that have been red for the same reason three times in a row. "
+        "It surfaces what needs attention so you can focus your energy on the right things."
+    )
+
     st.markdown("---")
-    
+
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         if st.button("🚀 Get Started", width='stretch', type="primary"):
@@ -159,10 +94,6 @@ def show_onboarding():
                 st.rerun()
             else:
                 st.error("Failed to save your progress. Please try again.")
-    
-    # Footer
-    st.markdown("---")
-    st.markdown("*This tool helps you lead with data-backed human insight.*")
 
 def show_main_app():
     """Display the main application after onboarding"""
@@ -173,6 +104,14 @@ def show_main_app():
         initial_sidebar_state="expanded"
     )
     
+    st.markdown("""
+<style>
+.dataframe {font-size: 14px !important;}
+.dataframe td {padding: 8px !important;}
+.dataframe th {padding: 8px !important; font-size: 13px !important;}
+</style>
+""", unsafe_allow_html=True)
+
     # Sidebar navigation
     show_navigation()
 
@@ -268,22 +207,39 @@ def show_main_app():
         st.caption("Latest annotation per operational metric")
 
         CLASS_EMOJI = {'Red': '🔴', 'Orange': '🟠', 'Amber': '⚠️'}
+        metric_flags_by_id = {mf['metric_id']: mf['flag_type'] for mf in metric_flags}
 
         if not all_metrics:
             st.info("No metrics configured.")
         else:
+            metric_rows = []
             for metric in all_metrics:
                 ann = ann_by_metric.get(metric['id'])
                 if ann:
-                    emoji = CLASS_EMOJI.get(ann['classification'], '⬜')
-                    st.markdown(f"{emoji} **{metric['name']}** — {ann['current_value']}")
-                    preview = ann['explanation'][:80]
-                    if len(ann['explanation']) > 80:
-                        preview += "..."
-                    st.caption(preview)
+                    cls = ann['classification']
+                    classification = f"{CLASS_EMOJI.get(cls, '')} {cls}"
+                    current_value = ann['current_value']
+                    target_value = ann.get('target_value') or "—"
+                    last_annotated = ann['annotated_at'][:10]
                 else:
-                    st.markdown(f"⬜ **{metric['name']}** — *No annotation yet*")
-                st.markdown("")
+                    classification = "—"
+                    current_value = "No annotation yet"
+                    target_value = "—"
+                    last_annotated = "Never"
+
+                flag_type = metric_flags_by_id.get(metric['id'])
+                trend = '📈' if flag_type == 'improving_trend' else ('🔴' if flag_type == 'sustained_red' else '—')
+
+                metric_rows.append({
+                    'Metric':          metric['name'],
+                    'Current Value':   current_value,
+                    'Target Value':    target_value,
+                    'Classification':  classification,
+                    'Last Annotated':  last_annotated,
+                    'Trend':           trend,
+                })
+
+            st.dataframe(pd.DataFrame(metric_rows), width='stretch', hide_index=True)
 
         st.divider()
 
@@ -291,33 +247,63 @@ def show_main_app():
         st.markdown("## Active Flags")
         st.caption("Items requiring your attention right now")
 
-        FLAG_LABELS = {
-            'stress_trend': ('⚠️', 'stress trend'),
-            'uncertainty_trend': ('⚠️', 'uncertainty trend'),
-            'delivery_trend': ('🔴', 'delivery at risk'),
-            'energy_trend': ('⚠️', 'low energy trend'),
+        FLAG_DESCRIPTIONS = {
+            'stress_trend':      "High stress",
+            'uncertainty_trend': "High uncertainty",
+            'delivery_trend':    "Delivery at risk",
+            'energy_trend':      "Low energy trend",
         }
-        METRIC_FLAG_LABELS = {
-            'sustained_red': ('🔴', 'sustained red'),
-            'improving_trend': ('📈', 'improving trend'),
-            'sustained_improvement': ('✅', 'sustained improvement'),
+        METRIC_FLAG_DESCRIPTIONS = {
+            'sustained_red':         "Sustained Red",
+            'improving_trend':       "Improving trend",
+            'sustained_improvement': "Sustained improvement",
         }
 
-        has_any = bool(trend_flags or metric_flags)
+        flag_rows = []
 
         for flag in trend_flags:
-            emoji, label = FLAG_LABELS.get(flag['flag_type'], ('⚠️', flag['flag_type']))
-            st.markdown(f"{emoji} **{flag['engineer_name']}** — {label} ({flag['duration']} check-ins)")
-
-        if trend_flags and metric_flags:
-            st.markdown("---")
+            flag_rows.append({
+                'Type':  'Engineer Signal',
+                'Name':  flag['engineer_name'],
+                'Flag':  FLAG_DESCRIPTIONS.get(flag['flag_type'], flag['flag_type']),
+                'Since': f"{flag['duration']} weeks",
+            })
 
         for flag in metric_flags:
-            emoji, label = METRIC_FLAG_LABELS.get(flag['flag_type'], ('⚠️', flag['flag_type']))
-            st.markdown(f"{emoji} **{flag['metric_name']}** — {label} ({flag['duration']} annotations)")
+            flag_rows.append({
+                'Type':  'Metric',
+                'Name':  flag['metric_name'],
+                'Flag':  METRIC_FLAG_DESCRIPTIONS.get(flag['flag_type'], flag['flag_type']),
+                'Since': f"{flag['duration']} annotations",
+            })
 
-        if not has_any:
-            st.info("No active flags. Team is on track.")
+        for blocker in aging_blockers_list:
+            try:
+                open_date = datetime.strptime(blocker['open_since'], "%Y-%m-%d").date()
+                days_open = (datetime.today().date() - open_date).days
+            except Exception:
+                days_open = "?"
+            desc = blocker['description']
+            flag_rows.append({
+                'Type':  'Blocker',
+                'Name':  desc[:50] + ("..." if len(desc) > 50 else ""),
+                'Flag':  "Aging blocker",
+                'Since': f"{days_open} days",
+            })
+
+        for pattern in patterns:
+            ptype = "Team stress" if pattern['pattern_type'] == 'stress_pattern' else "Team uncertainty"
+            flag_rows.append({
+                'Type':  'Team-Wide',
+                'Name':  f"{pattern['affected_count']} of {pattern['total_engineers']} engineers",
+                'Flag':  ptype,
+                'Since': f"{pattern['duration_weeks']} weeks",
+            })
+
+        if flag_rows:
+            st.dataframe(pd.DataFrame(flag_rows), width='stretch', hide_index=True)
+        else:
+            st.success("✅ No active flags — your team is in good shape this week.")
 
         st.divider()
 
