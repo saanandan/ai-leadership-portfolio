@@ -132,30 +132,40 @@ def build_brief_prompt(data):
 
 ---
 
-Generate a leadership brief with exactly these 8 sections in order. Use markdown headers (##) for each section. Be direct, factual, and solution-oriented. Mix short narrative with bullet points where appropriate. Do not invent information — if data is missing for a section, say so briefly.
+Generate a leadership brief using the exact structure below. Use markdown headers (##) for each section. Keep the entire brief readable in under 3 minutes — use bullet points not paragraphs, and be direct and factual. Do not invent information not present in the data above.
 
-## 1. Team Overview
-A 2-3 sentence summary of overall team health this period based on energy levels, delivery signals, and growth signals.
+## Director Summary
+Exactly three bullet points. Each bullet is one sentence maximum — no run-on sentences. Plain English, no jargon. Lead with metrics and blockers; people are important context but not the headline.
+- 🔴 **Needs your attention:** the single most urgent issue — lead with a metric that is a genuine problem if one exists, otherwise an aging blocker, otherwise a person at retention risk
+- 🟠 **Watch list:** the most important thing being actively managed — lead with a metric leadership should be aware of if one exists, otherwise a blocker in progress, otherwise a person showing early warning signs
+- ✅ **On track:** the most notable positive — lead with a metric improving if one exists, otherwise a blocker resolved, otherwise a person performing well
 
-## 2. Delivery Status
-Who is on track, who is at risk, and who is blocked. Include any delivery trend flags. Note if anyone needs immediate attention.
+## Needs Leadership Escalation
+Issues outside the manager's control that require director or above intervention. Use bullet points, in this order:
+- Metrics with genuine issues caused by external factors (dependency failures, retroactive policy changes) — lead each with a one-sentence plain English verdict
+- Aging blockers requiring escalation — include the specific ask
+- People at retention risk who need skip-level awareness
 
-## 3. Operational Metrics
-Summarize the current state of each annotated metric. Distinguish between genuine problems (Red), contextual issues (Orange), and temporary dips (Amber). Include expected resolution dates where set.
+If nothing requires escalation, say so in one line.
 
-## 4. Trends Requiring Attention
-List any active trend flags for engineers or metrics that need management action. For each trend, suggest a concrete next step.
+## Manager Has a Handle On It
+Issues being actively managed within the team's control. Use bullet points, in this order:
+- Metrics that are Red or Orange but improving with a clear plan — lead each with a one-sentence plain English verdict
+- Blockers being actively worked by the manager
+- Individual engineer trends being monitored and addressed
 
-## 5. Bright Spots
-What is going well? Highlight positive signals, improving metrics, engineers showing growth, engineers on track.
+If nothing is in this category, say so in one line.
 
-## 6. Manager Blockers
-List all active blockers needing manager involvement. Flag any aging blockers (14+ days). State the specific ask for each.
+## On Track
+Things going well that deserve recognition. Use bullet points, in this order:
+- Metrics showing sustained improvement or a clear positive trajectory
+- No active blocker issues (note this if true)
+- Engineers performing strongly — wins and bright spots worth calling out
 
-## 7. Manager Actions
-A prioritized list of specific actions the manager should take in the next 1-2 weeks based on everything above. Be concrete and actionable.
+## Manager Actions
+A prioritized bullet list of specific actions the manager should take in the next 1-2 weeks. Be concrete — name the person, name the action.
 
-## 8. Looking Ahead
+## Looking Ahead
 1-2 sentences on what to watch closely in the coming period given current trends and open items.
 """
 

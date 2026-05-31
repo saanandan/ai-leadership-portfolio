@@ -24,17 +24,59 @@ def show_about():
 
     st.markdown("---")
 
-    st.markdown("## The principles behind it")
-
-    st.markdown("### People leadership still matters.")
+    st.markdown("## Legend")
     st.markdown(
         '<p style="font-size: 16px; line-height: 1.6">'
-        "AI is changing how fast we build. It is not changing the fact that humans build it. "
-        "The signals that predict team health — energy, stress, uncertainty, growth — live in 1:1 conversations, "
-        "not dashboards. This tool captures them consistently so nothing gets lost."
+        "A quick reference for all colors and icons used throughout the tool."
         "</p>",
         unsafe_allow_html=True,
     )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown(
+            '<p style="font-size: 15px; line-height: 1.8; margin-bottom: 0">'
+            "<strong>Metric Classifications</strong><br>"
+            "🔴 <strong>Red</strong> — Genuine issue, immediate action needed<br>"
+            "🟠 <strong>Orange</strong> — Contextual — looks bad but explained<br>"
+            "⚠️ <strong>Amber</strong> — Temporary, resolves by known date"
+            "</p>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<p style="font-size: 15px; line-height: 1.8; margin-top: 12px; margin-bottom: 0">'
+            "<strong>Trend Flags</strong><br>"
+            "⚠️ Active flag — sustained pattern, needs attention<br>"
+            "📈 Improving — metric or signal moving in the right direction"
+            "</p>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<p style="font-size: 15px; line-height: 1.8; margin-top: 12px">'
+            "<strong>Blockers</strong><br>"
+            "🔴 Aging — open 14+ days, needs escalation<br>"
+            "🟠 Recent — being actively managed"
+            "</p>",
+            unsafe_allow_html=True,
+        )
+
+    with col2:
+        st.markdown(
+            '<p style="font-size: 15px; line-height: 1.8">'
+            "<strong>Engineer Signals</strong><br>"
+            "🔋 Energy: 1 = Depleted · 5 = Highly energized<br>"
+            "Delivery: ✅ On Track / ⚠️ At Risk / 🔴 Blocked<br>"
+            "Growth: 🌱 Growing / ➡️ Coasting / 📉 Struggling<br>"
+            "Stress: 😌 Low / 😐 Moderate / 😰 High<br>"
+            "Uncertainty: Low / Moderate / High"
+            "</p>",
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("---")
+
+    st.markdown("## The principles behind it")
 
     st.markdown("### Context is what makes data useful.")
     st.markdown(
@@ -57,13 +99,24 @@ def show_about():
         unsafe_allow_html=True,
     )
 
+    st.markdown("### People leadership still matters.")
+    st.markdown(
+        '<p style="font-size: 16px; line-height: 1.6">'
+        "AI is changing how fast we build. It is not changing the fact that humans build it. "
+        "The signals that predict team health — energy, stress, uncertainty, growth — live in 1:1 conversations, "
+        "not dashboards. This tool captures them consistently so nothing gets lost."
+        "</p>",
+        unsafe_allow_html=True,
+    )
+
     st.markdown("---")
 
     st.markdown("## What it does")
     st.markdown(
         '<ul style="font-size: 16px; line-height: 1.6">'
-        "<li><strong>Log human signals after 1:1s</strong> — 2 minutes per engineer per week</li>"
         "<li><strong>Annotate operational metrics</strong> with context and classification</li>"
+        "<li><strong>Log manager blockers</strong> with escalation structure</li>"
+        "<li><strong>Log human signals after 1:1s</strong> — 2 minutes per engineer per week</li>"
         "<li><strong>Generate a weekly brief</strong> that synthesizes everything</li>"
         "<li><strong>Build organizational memory</strong> that gets smarter over time</li>"
         "</ul>",

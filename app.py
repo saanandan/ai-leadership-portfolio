@@ -145,6 +145,69 @@ def show_main_app():
         ann_by_metric = {a['metric_id']: a for a in latest_annotations}
         all_metrics = get_all_metrics()
         metric_flags = get_metric_trend_flags()
+        metric_flags_by_id = {mf['metric_id']: mf['flag_type'] for mf in metric_flags}
+        metric_improving_ids = {mf['metric_id'] for mf in metric_flags if mf['flag_type'] == 'improving_trend'}
+
+        # ── Team Health Summary ─────────────────────────────────────────────
+        _FLAG_PRIORITY = ['delivery_trend', 'stress_trend', 'uncertainty_trend', 'energy_trend']
+        _FLAG_LABEL = {
+            'delivery_trend':    'Delivery at risk',
+            'stress_trend':      'High stress',
+            'uncertainty_trend': 'High uncertainty',
+            'energy_trend':      'Low energy',
+        }
+
+        # Split annotated metrics into genuine issues vs managed/contextual
+        _genuine_issues = []
+        _managed = []
+        for _metric in all_metrics:
+            _ann = ann_by_metric.get(_metric['id'])
+            if not _ann:
+                continue
+            _cls = _ann['classification']
+            _improving = _metric['id'] in metric_improving_ids
+            if _cls == 'Red' and not _improving:
+                _genuine_issues.append(_metric['name'])
+            elif _cls in ('Orange', 'Amber') or (_cls == 'Red' and _improving):
+                _managed.append(_metric['name'])
+
+        # One entry per flagged engineer, highest-priority flag only
+        _eng_flags: dict = {}
+        for _flag in trend_flags:
+            _eid = _flag['engineer_id']
+            if _eid not in _eng_flags:
+                _eng_flags[_eid] = {'name': _flag['engineer_name'], 'flags': []}
+            _eng_flags[_eid]['flags'].append(_flag['flag_type'])
+
+        _flagged_people = []
+        for _einfo in _eng_flags.values():
+            _primary = next((_f for _f in _FLAG_PRIORITY if _f in _einfo['flags']), _einfo['flags'][0])
+            _flagged_people.append((_einfo['name'], _FLAG_LABEL.get(_primary, _primary)))
+
+        _has_metrics = bool(_genuine_issues or _managed)
+        _has_people = bool(_flagged_people)
+
+        with st.container(border=True):
+            st.markdown(
+                f"### Team Health Summary — {datetime.today().strftime('%B %d, %Y')}"
+            )
+            if not _has_metrics and not _has_people:
+                st.markdown("✅ No critical issues — team is in good shape this week.")
+            else:
+                if _has_metrics:
+                    st.markdown("**Metrics**")
+                    _genuine_str = ", ".join(_genuine_issues) if _genuine_issues else "None"
+                    st.markdown(f"🔴 **Metric issues needing action:** {_genuine_str}")
+                    if _managed:
+                        st.markdown(
+                            f"🟠 **Metrics that look bad but are being managed:** {', '.join(_managed)}"
+                        )
+                if _has_people:
+                    if _has_metrics:
+                        st.markdown("&nbsp;")
+                    st.markdown("**People**")
+                    for _pname, _plabel in _flagged_people:
+                        st.markdown(f"🔴 **People needing attention:** {_pname} — {_plabel}")
 
         # ── Alert Banners ───────────────────────────────────────────────────
         for pattern in patterns:
@@ -161,7 +224,47 @@ def show_main_app():
                 open_dt = blocker['open_since']
             st.error(f"🔴 **Aging Blocker:** \"{blocker['description']}\" — open since {open_dt}")
 
-        # ── Panel 1: Team Signal Status ─────────────────────────────────────
+        # ── Panel 1: Metric Status ───────────────────────────────────────────
+        st.markdown("## Metric Status")
+        st.caption("Latest annotation per operational metric")
+
+        CLASS_EMOJI = {'Red': '🔴', 'Orange': '🟠', 'Amber': '⚠️'}
+
+        if not all_metrics:
+            st.info("No metrics configured.")
+        else:
+            metric_rows = []
+            for metric in all_metrics:
+                ann = ann_by_metric.get(metric['id'])
+                if ann:
+                    cls = ann['classification']
+                    classification = f"{CLASS_EMOJI.get(cls, '')} {cls}"
+                    current_value = ann['current_value']
+                    target_value = ann.get('target_value') or "—"
+                    last_annotated = ann['annotated_at'][:10]
+                else:
+                    classification = "—"
+                    current_value = "No annotation yet"
+                    target_value = "—"
+                    last_annotated = "Never"
+
+                flag_type = metric_flags_by_id.get(metric['id'])
+                trend = '📈' if flag_type == 'improving_trend' else ('🔴' if flag_type == 'sustained_red' else '—')
+
+                metric_rows.append({
+                    'Metric':          metric['name'],
+                    'Current Value':   current_value,
+                    'Target Value':    target_value,
+                    'Classification':  classification,
+                    'Last Annotated':  last_annotated,
+                    'Trend':           trend,
+                })
+
+            st.dataframe(pd.DataFrame(metric_rows), width='stretch', hide_index=True)
+
+        st.divider()
+
+        # ── Panel 2: Team Signal Status ─────────────────────────────────────
         st.markdown("## Team Signal Status")
         st.caption("Most recent signal logged per engineer")
 
@@ -199,47 +302,6 @@ def show_main_app():
 
         st.divider()
 
-        # ── Panel 2: Metric Status ───────────────────────────────────────────
-        st.markdown("## Metric Status")
-        st.caption("Latest annotation per operational metric")
-
-        CLASS_EMOJI = {'Red': '🔴', 'Orange': '🟠', 'Amber': '⚠️'}
-        metric_flags_by_id = {mf['metric_id']: mf['flag_type'] for mf in metric_flags}
-
-        if not all_metrics:
-            st.info("No metrics configured.")
-        else:
-            metric_rows = []
-            for metric in all_metrics:
-                ann = ann_by_metric.get(metric['id'])
-                if ann:
-                    cls = ann['classification']
-                    classification = f"{CLASS_EMOJI.get(cls, '')} {cls}"
-                    current_value = ann['current_value']
-                    target_value = ann.get('target_value') or "—"
-                    last_annotated = ann['annotated_at'][:10]
-                else:
-                    classification = "—"
-                    current_value = "No annotation yet"
-                    target_value = "—"
-                    last_annotated = "Never"
-
-                flag_type = metric_flags_by_id.get(metric['id'])
-                trend = '📈' if flag_type == 'improving_trend' else ('🔴' if flag_type == 'sustained_red' else '—')
-
-                metric_rows.append({
-                    'Metric':          metric['name'],
-                    'Current Value':   current_value,
-                    'Target Value':    target_value,
-                    'Classification':  classification,
-                    'Last Annotated':  last_annotated,
-                    'Trend':           trend,
-                })
-
-            st.dataframe(pd.DataFrame(metric_rows), width='stretch', hide_index=True)
-
-        st.divider()
-
         # ── Panel 3: Active Flags ────────────────────────────────────────────
         st.markdown("## Active Flags")
         st.caption("Items requiring your attention right now")
@@ -257,14 +319,6 @@ def show_main_app():
         }
 
         flag_rows = []
-
-        for flag in trend_flags:
-            flag_rows.append({
-                'Type':  'Engineer Signal',
-                'Name':  flag['engineer_name'],
-                'Flag':  FLAG_DESCRIPTIONS.get(flag['flag_type'], flag['flag_type']),
-                'Since': f"{flag['duration']} weeks",
-            })
 
         for flag in metric_flags:
             flag_rows.append({
@@ -286,6 +340,14 @@ def show_main_app():
                 'Name':  desc[:50] + ("..." if len(desc) > 50 else ""),
                 'Flag':  "Aging blocker",
                 'Since': f"{days_open} days",
+            })
+
+        for flag in trend_flags:
+            flag_rows.append({
+                'Type':  'Engineer Signal',
+                'Name':  flag['engineer_name'],
+                'Flag':  FLAG_DESCRIPTIONS.get(flag['flag_type'], flag['flag_type']),
+                'Since': f"{flag['duration']} weeks",
             })
 
         for pattern in patterns:
